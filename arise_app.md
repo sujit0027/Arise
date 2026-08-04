@@ -1,0 +1,2 @@
+**App Name** Arise
+ek sumsung modes aur routine ki tarah ek app jo same usi ki tarah kam kare arise.jpg ki tarah jaha pe ham chije set kar sake like auto matically timer set karna manual click se mode open karna jisme wallpaper change ho jaye off karne par wapas wallpaper reset ho jaye aur timer jis tarah se sumsung music lock screen ke upar ek screen show karta hai jisme music controls hote aur swipe karne par woh screen hat kar lock screen visible ho jati hai app ko restricate karna mode start hone pe
