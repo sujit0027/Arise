@@ -34,6 +34,7 @@ class RoutineService : Service() {
     private val appCheckRunnable = object : Runnable {
         override fun run() {
             if (isMonitoring) {
+                checkDurationExpiry()
                 checkForegroundApp()
                 handler.postDelayed(this, 1000) // check every second
             }
@@ -89,9 +90,16 @@ class RoutineService : Service() {
         
         // Save state in prefs
         val sharedPrefs = getSharedPreferences("ArisePrefs", Context.MODE_PRIVATE)
+        val endTime = if (routine.durationMinutes > 0) {
+            System.currentTimeMillis() + (routine.durationMinutes * 60 * 1000)
+        } else {
+            -1L
+        }
+
         sharedPrefs.edit().apply {
             putString("active_routine_id", routine.id)
             putString("routine_${routine.id}", routine.toJsonObject().toString())
+            putLong("active_routine_end_time", endTime)
             apply()
         }
 
@@ -104,15 +112,23 @@ class RoutineService : Service() {
             applyWallpaper(uriStr)
         }
 
-        // 3. Start app restriction monitoring if any apps are blocked
-        if (routine.blockedApps.isNotEmpty()) {
-            isMonitoring = true
-            handler.removeCallbacks(appCheckRunnable)
-            handler.post(appCheckRunnable)
-            Log.d("RoutineService", "App monitoring started for: ${routine.blockedApps}")
-        } else {
-            isMonitoring = false
-            handler.removeCallbacks(appCheckRunnable)
+        // 3. Always start monitoring loop to check timer expiry and restricted apps
+        isMonitoring = true
+        handler.removeCallbacks(appCheckRunnable)
+        handler.post(appCheckRunnable)
+        Log.d("RoutineService", "App monitoring and timer started for routine: ${routine.name}")
+    }
+
+    private fun checkDurationExpiry() {
+        val routine = activeRoutine ?: return
+        if (routine.durationMinutes > 0) {
+            val sharedPrefs = getSharedPreferences("ArisePrefs", Context.MODE_PRIVATE)
+            val endTime = sharedPrefs.getLong("active_routine_end_time", -1L)
+            if (endTime > 0 && System.currentTimeMillis() >= endTime) {
+                Log.d("RoutineService", "Routine duration expired. Stopping...")
+                stopActiveRoutine()
+                stopSelf()
+            }
         }
     }
 
@@ -129,6 +145,7 @@ class RoutineService : Service() {
                     sharedPrefs.edit().apply {
                         putString("routine_$activeId", routine.toJsonObject().toString())
                         remove("active_routine_id")
+                        remove("active_routine_end_time")
                         apply()
                     }
                 } catch (e: Exception) {

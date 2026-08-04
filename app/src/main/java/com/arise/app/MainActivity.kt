@@ -1,10 +1,11 @@
 package com.arise.app
 
+import android.app.AlarmManager
 import android.app.AppOpsManager
+import android.app.PendingIntent
 import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -16,52 +17,22 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -70,25 +41,21 @@ import java.util.Calendar
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
         setContent {
             MaterialTheme {
-                MainDashboardScreen()
+                SamsungRoutineUI()
             }
         }
     }
 }
 
-data class AppItem(val name: String, val packageName: String, var isSelected: Boolean = false)
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainDashboardScreen() {
+fun SamsungRoutineUI() {
     val context = LocalContext.current
     val sharedPrefs = remember { context.getSharedPreferences("ArisePrefs", Context.MODE_PRIVATE) }
     
-    // States
-    val routines = remember { mutableStateListOf<RoutineModel>() }
+    // Core states
+    var routine by remember { mutableStateOf(RoutineModel(name = "Arise Mode")) }
     var activeRoutineId by remember { mutableStateOf<String?>(null) }
     
     var overlayPermissionGranted by remember { mutableStateOf(false) }
@@ -97,15 +64,16 @@ fun MainDashboardScreen() {
     
     var defaultWallpaperUri by remember { mutableStateOf<String?>(null) }
     
-    // Dialog States
-    var showCreateDialog by remember { mutableStateOf(false) }
-    var newRoutineName by remember { mutableStateOf("") }
-    
-    var editingRoutine by remember { mutableStateOf<RoutineModel?>(null) }
+    // Dialog / Selection states
+    var showDurationDialog by remember { mutableStateOf(false) }
+    var showAutoTriggerDialog by remember { mutableStateOf(false) }
     var showAppPickerDialog by remember { mutableStateOf(false) }
+    var customMinutesInput by remember { mutableStateOf("") }
+    var showCustomMinutesDialog by remember { mutableStateOf(false) }
+    
     val allApps = remember { mutableStateListOf<AppItem>() }
 
-    // Check Permissions
+    // Helper functions
     fun checkPermissions() {
         overlayPermissionGranted = Settings.canDrawOverlays(context)
         
@@ -125,67 +93,51 @@ fun MainDashboardScreen() {
         }
     }
 
-    // Load initial data
+    // Load initial states
     LaunchedEffect(Unit) {
         checkPermissions()
         defaultWallpaperUri = sharedPrefs.getString("default_wallpaper_uri", null)
         activeRoutineId = sharedPrefs.getString("active_routine_id", null)
         
-        // Load routines from prefs
-        val keys = sharedPrefs.all.keys
-        routines.clear()
-        keys.forEach { key ->
-            if (key.startsWith("routine_")) {
-                val jsonStr = sharedPrefs.getString(key, null)
-                if (jsonStr != null) {
-                    try {
-                        routines.add(RoutineModel.fromJson(jsonStr))
-                    } catch (e: Exception) {
-                        Log.e("MainActivity", "Error parsing routine JSON: ${e.message}")
-                    }
-                }
+        // Load or create single default routine
+        val routineJson = sharedPrefs.getString("routine_arise_default", null)
+        if (routineJson != null) {
+            try {
+                routine = RoutineModel.fromJson(routineJson)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to parse routine: ${e.message}")
             }
-        }
-        
-        // If empty, add a default manual routine
-        if (routines.isEmpty()) {
-            val defaultRoutine = RoutineModel(name = "Focus Routine")
-            sharedPrefs.edit().putString("routine_${defaultRoutine.id}", defaultRoutine.toJsonObject().toString()).apply()
-            routines.add(defaultRoutine)
+        } else {
+            val defaultRoutine = RoutineModel(id = "arise_default", name = "Arise Focus Mode")
+            sharedPrefs.edit().putString("routine_arise_default", defaultRoutine.toJsonObject().toString()).apply()
+            routine = defaultRoutine
         }
     }
 
-    // Recheck permissions on window focus
-    LaunchedEffect(showCreateDialog, showAppPickerDialog) {
+    // Recheck permissions when dialogs change
+    LaunchedEffect(showDurationDialog, showAutoTriggerDialog, showAppPickerDialog) {
         checkPermissions()
     }
 
-    // Launchers for custom wallpapers
-    val routineWallpaperPicker = rememberLauncherForActivityResult(
+    // Wallpaper Pickers
+    val lockScreenWallpaperPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             uri?.let {
                 try {
                     context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    editingRoutine?.let { routine ->
-                        routine.wallpaperUri = it.toString()
-                        // Save routine
-                        sharedPrefs.edit().putString("routine_${routine.id}", routine.toJsonObject().toString()).apply()
-                        // Force recompose
-                        val idx = routines.indexOfFirst { r -> r.id == routine.id }
-                        if (idx != -1) {
-                            routines[idx] = routine.copy(wallpaperUri = it.toString())
-                        }
-                    }
-                    Toast.makeText(context, "Routine Wallpaper Selected!", Toast.LENGTH_SHORT).show()
+                    val updated = routine.copy(wallpaperUri = it.toString())
+                    routine = updated
+                    sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
+                    Toast.makeText(context, "Lockscreen wallpaper selected!", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
-                    Toast.makeText(context, "Failed to read image permission.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Failed to read image permissions.", Toast.LENGTH_LONG).show()
                 }
             }
         }
     )
 
-    val defaultWallpaperPicker = rememberLauncherForActivityResult(
+    val homeScreenWallpaperPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             uri?.let {
@@ -193,9 +145,9 @@ fun MainDashboardScreen() {
                     context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     defaultWallpaperUri = it.toString()
                     sharedPrefs.edit().putString("default_wallpaper_uri", it.toString()).apply()
-                    Toast.makeText(context, "Default Reset Wallpaper Saved!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Homescreen (Reset) wallpaper saved!", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
-                    Toast.makeText(context, "Failed to read image permission.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Failed to read image permissions.", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -208,18 +160,98 @@ fun MainDashboardScreen() {
         }
     )
 
-    // Load installed launcher apps
+    // AlarmManager scheduling
+    fun scheduleAutoTrigger(r: RoutineModel) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        
+        // 1. Schedule auto start
+        r.autoStartTime?.let { startStr ->
+            val parts = startStr.split(":")
+            val calendar = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, parts[0].toInt())
+                set(Calendar.MINUTE, parts[1].toInt())
+                set(Calendar.SECOND, 0)
+                if (before(Calendar.getInstance())) {
+                    add(Calendar.DATE, 1)
+                }
+            }
+            val startIntent = Intent(context, RoutineReceiver::class.java).apply {
+                action = "ACTION_START_ROUTINE"
+                putExtra("routine_id", r.id)
+            }
+            val pendingStart = PendingIntent.getBroadcast(
+                context, r.id.hashCode(), startIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            try {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingStart)
+                Log.d("MainActivity", "Scheduled auto start alarm at: $startStr")
+            } catch (e: SecurityException) {
+                Toast.makeText(context, "Exact alarm permission required.", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        // 2. Schedule auto end
+        r.autoEndTime?.let { endStr ->
+            val parts = endStr.split(":")
+            val calendar = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, parts[0].toInt())
+                set(Calendar.MINUTE, parts[1].toInt())
+                set(Calendar.SECOND, 0)
+                if (before(Calendar.getInstance())) {
+                    add(Calendar.DATE, 1)
+                }
+            }
+            val stopIntent = Intent(context, RoutineReceiver::class.java).apply {
+                action = "ACTION_STOP_ROUTINE"
+            }
+            val pendingStop = PendingIntent.getBroadcast(
+                context, r.id.hashCode() + 1, stopIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            try {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingStop)
+                Log.d("MainActivity", "Scheduled auto stop alarm at: $endStr")
+            } catch (e: SecurityException) {
+                // Ignore
+            }
+        }
+    }
+
+    fun cancelAutoTrigger(r: RoutineModel) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        
+        val startIntent = Intent(context, RoutineReceiver::class.java).apply {
+            action = "ACTION_START_ROUTINE"
+        }
+        val pendingStart = PendingIntent.getBroadcast(
+            context, r.id.hashCode(), startIntent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        pendingStart?.let { alarmManager.cancel(it) }
+
+        val stopIntent = Intent(context, RoutineReceiver::class.java).apply {
+            action = "ACTION_STOP_ROUTINE"
+        }
+        val pendingStop = PendingIntent.getBroadcast(
+            context, r.id.hashCode() + 1, stopIntent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        pendingStop?.let { alarmManager.cancel(it) }
+        Log.d("MainActivity", "Cancelled AlarmManager triggers")
+    }
+
+    // App loader (thanks to QUERY_ALL_PACKAGES, this works fully now!)
     fun loadInstalledApps() {
         val pm = context.packageManager
         val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
         val filteredApps = mutableListOf<AppItem>()
         
         apps.forEach { app ->
-            // Filter system apps, only show launchable ones
             val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
             if (launchIntent != null && app.packageName != context.packageName) {
                 val label = pm.getApplicationLabel(app).toString()
-                val isSelected = editingRoutine?.blockedApps?.contains(app.packageName) ?: false
+                val isSelected = routine.blockedApps.contains(app.packageName)
                 filteredApps.add(AppItem(label, app.packageName, isSelected))
             }
         }
@@ -230,415 +262,264 @@ fun MainDashboardScreen() {
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF0F172A) // Sleek Premium dark blue background
+        color = Color(0xFF0F1014) // Dark premium AMOLED black/navy background
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp)
+                .padding(horizontal = 20.dp)
         ) {
-            // Header
+            // Header: Close arrow & Actions
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp),
+                    .padding(vertical = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Text(
+                    text = "〈",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.clickable { /* Exit or minimize */ }
+                )
+                Text(
+                    text = "︙",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+
+            // Samsung-like visual badge at the top
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Circle Badge
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF2D1B1E)), // Coral dark tint
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
-                        text = "Arise",
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFF0EA5E9)
-                    )
-                    Text(
-                        text = "Modes & Routines Automation",
-                        fontSize = 13.sp,
-                        color = Color(0xFF64748B),
-                        fontWeight = FontWeight.Medium
+                        text = "★",
+                        color = Color(0xFFFCA5A5), // warm red/salmon star
+                        fontSize = 32.sp
                     )
                 }
+                Spacer(modifier = Modifier.height(12.dp))
+                // Mode Title
+                Text(
+                    text = routine.name,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.height(16.dp))
                 
+                // Big "Turn on" / "Turn off" Button
+                val isRunning = activeRoutineId == routine.id
                 Button(
                     onClick = {
-                        newRoutineName = ""
-                        showCreateDialog = true
+                        if (isRunning) {
+                            // Turn Off
+                            val serviceIntent = Intent(context, RoutineService::class.java).apply {
+                                action = "STOP"
+                            }
+                            context.startService(serviceIntent)
+                            activeRoutineId = null
+                        } else {
+                            // Turn On (Validate permissions)
+                            if (!overlayPermissionGranted || !usageStatsPermissionGranted) {
+                                Toast.makeText(context, "Overlay and Usage access permissions are required!", Toast.LENGTH_LONG).show()
+                                return@Button
+                            }
+                            
+                            val serviceIntent = Intent(context, RoutineService::class.java).apply {
+                                action = "START"
+                                putExtra("routine_id", routine.id)
+                            }
+                            context.startForegroundService(serviceIntent)
+                            activeRoutineId = routine.id
+                        }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0EA5E9)),
-                    shape = RoundedCornerShape(12.dp)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isRunning) Color(0xFF374151) else Color(0xFF3B82F6) // Gray for off, Blue for on
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                    contentPadding = PaddingValues(horizontal = 36.dp, vertical = 12.dp)
                 ) {
-                    Text(text = "+ Create", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (isRunning) "Turn off" else "Turn on",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
                 }
             }
 
-            HorizontalDivider(color = Color(0xFF1E293B), modifier = Modifier.padding(vertical = 8.dp))
-
-            // Dashboard items (Scrollable)
+            // Scrollable List of Settings
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Section: Setup Default Wallpaper
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Reset Wallpaper Setup",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "Choose the wallpaper you want to restore automatically when routines turn off.",
-                                fontSize = 12.sp,
-                                color = Color(0xFF94A3B8),
-                                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                // Section: Permissions Alert if missing
+                val needsPermissions = !overlayPermissionGranted || !usageStatsPermissionGranted || !notificationPermissionGranted
+                if (needsPermissions) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0x32EF4444))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
-                                    text = if (defaultWallpaperUri != null) "✓ Selected Custom Image" else "No wallpaper set (System default)",
-                                    fontSize = 13.sp,
-                                    color = if (defaultWallpaperUri != null) Color(0xFF10B981) else Color(0xFF94A3B8),
-                                    fontWeight = FontWeight.Medium
+                                    text = "Permissions Required",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFFCA5A5)
                                 )
-                                Button(
-                                    onClick = { defaultWallpaperPicker.launch(arrayOf("image/*")) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(text = "Choose Image", fontSize = 12.sp, color = Color.White)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Section: Permissions Checker
-                item {
-                    val needsPermissions = !overlayPermissionGranted || !usageStatsPermissionGranted || !notificationPermissionGranted
-                    
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (needsPermissions) Color(0x28EF4444) else Color(0xFF1E293B)
-                        )
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Permissions Dashboard",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // Draw over other apps
-                            PermissionRow(
-                                title = "Draw Over Other Apps",
-                                isGranted = overlayPermissionGranted,
-                                onRequest = {
-                                    val intent = Intent(
-                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                        Uri.parse("package:${context.packageName}")
-                                    )
-                                    context.startActivity(intent)
-                                }
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // App Usage Access
-                            PermissionRow(
-                                title = "App Usage Access",
-                                isGranted = usageStatsPermissionGranted,
-                                onRequest = {
-                                    val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-                                    context.startActivity(intent)
-                                }
-                            )
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 Spacer(modifier = Modifier.height(8.dp))
-                                // Notifications
-                                PermissionRow(
-                                    title = "Push Notifications",
-                                    isGranted = notificationPermissionGranted,
-                                    onRequest = {
+                                if (!overlayPermissionGranted) {
+                                    PermissionItem("Draw over other apps", onRequest = {
+                                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                        context.startActivity(intent)
+                                    })
+                                }
+                                if (!usageStatsPermissionGranted) {
+                                    PermissionItem("Usage Stats access", onRequest = {
+                                        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                                        context.startActivity(intent)
+                                    })
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notificationPermissionGranted) {
+                                    PermissionItem("Push Notifications", onRequest = {
                                         requestNotificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                                    }
-                                )
+                                    })
+                                }
                             }
                         }
                     }
                 }
 
-                // Section: Routines List Header
+                // Card: Turn on manually (Duration)
                 item {
-                    Text(
-                        text = "Your Routines",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.padding(top = 8.dp)
+                    SamsungSettingsCard(
+                        title = "Turn on manually",
+                        subtitle = if (routine.durationMinutes > 0) "Duration: For ${routine.durationMinutes} minutes" else "Duration: Until I turn it off",
+                        iconText = "⏳",
+                        onClick = { showDurationDialog = true }
                     )
                 }
 
-                // Routines list
-                items(routines) { routine ->
-                    val isRunning = activeRoutineId == routine.id
-                    
-                    Card(
+                // Card: Turn on automatically (Auto trigger time scheduler)
+                item {
+                    val autoText = if (routine.isAutoTriggerEnabled && routine.autoStartTime != null && routine.autoEndTime != null) {
+                        "Time: ${routine.autoStartTime} - ${routine.autoEndTime}"
+                    } else {
+                        "When to start this mode"
+                    }
+                    SamsungSettingsCard(
+                        title = "Turn on automatically",
+                        subtitle = autoText,
+                        iconText = "➕",
+                        onClick = { showAutoTriggerDialog = true }
+                    )
+                }
+
+                // Card Header: Choose what this mode does
+                item {
+                    Text(
+                        text = "Choose what this mode does",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF94A3B8),
+                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                    )
+                }
+
+                // Card: Stay focused (App blocker list)
+                item {
+                    SamsungSettingsCard(
+                        title = "Stay focused",
+                        subtitle = if (routine.blockedApps.isNotEmpty()) {
+                            "Blocked apps: ${routine.blockedApps.size} apps selected"
+                        } else {
+                            "Ways to avoid distractions"
+                        },
+                        iconText = "📵",
+                        onClick = {
+                            loadInstalledApps()
+                            showAppPickerDialog = true
+                        }
+                    )
+                }
+
+                // Card Header: Change appearance
+                item {
+                    Text(
+                        text = "Change appearance",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF94A3B8),
+                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                    )
+                }
+
+                // Appearance column / screens preview side-by-side
+                item {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                editingRoutine = routine
-                            },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isRunning) Color(0xFF1E3A8A) else Color(0xFF1E293B)
-                        )
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        // Lock screen preview Card
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .width(100.dp)
+                                    .height(160.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF1E2026))
+                                    .clickable { lockScreenWallpaperPicker.launch(arrayOf("image/*")) },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Column {
-                                    Text(
-                                        text = routine.name,
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                    Text(
-                                        text = if (routine.triggerType == "TIMER") "Trigger: Timer (${routine.triggerTime})" else "Trigger: Manual Tap",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF94A3B8)
-                                    )
-                                }
-
-                                Switch(
-                                    checked = isRunning,
-                                    onCheckedChange = { isChecked ->
-                                        if (isChecked) {
-                                            // Check permissions first
-                                            if (!overlayPermissionGranted || !usageStatsPermissionGranted) {
-                                                Toast.makeText(context, "Please grant all overlay and usage access permissions first!", Toast.LENGTH_LONG).show()
-                                                return@Switch
-                                            }
-                                            
-                                            // Start service
-                                            val serviceIntent = Intent(context, RoutineService::class.java).apply {
-                                                action = "START"
-                                                putExtra("routine_id", routine.id)
-                                            }
-                                            context.startForegroundService(serviceIntent)
-                                            activeRoutineId = routine.id
-                                            
-                                            // Update model state locally
-                                            val idx = routines.indexOfFirst { r -> r.id == routine.id }
-                                            if (idx != -1) {
-                                                routines[idx] = routine.copy(isActive = true)
-                                            }
-                                        } else {
-                                            // Stop service
-                                            val serviceIntent = Intent(context, RoutineService::class.java).apply {
-                                                action = "STOP"
-                                            }
-                                            context.startService(serviceIntent)
-                                            activeRoutineId = null
-                                            
-                                            // Update model state locally
-                                            val idx = routines.indexOfFirst { r -> r.id == routine.id }
-                                            if (idx != -1) {
-                                                routines[idx] = routine.copy(isActive = false)
-                                            }
-                                        }
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF0EA5E9),
-                                        checkedTrackColor = Color(0x3B0EA5E9),
-                                        uncheckedThumbColor = Color(0xFF64748B),
-                                        uncheckedTrackColor = Color(0xFF334155)
-                                    )
-                                )
-                            }
-
-                            // Quick settings if editing this card
-                            AnimatedVisibility(visible = editingRoutine?.id == routine.id) {
-                                Column(modifier = Modifier.padding(top = 16.dp)) {
-                                    HorizontalDivider(color = Color(0xFF334155), modifier = Modifier.padding(bottom = 12.dp))
-                                    
-                                    // Wallpaper picker for routine
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Routine Wallpaper:",
-                                            fontSize = 13.sp,
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        TextButton(
-                                            onClick = { routineWallpaperPicker.launch(arrayOf("image/*")) }
-                                        ) {
-                                            Text(
-                                                text = if (routine.wallpaperUri != null) "✓ Change Image" else "Select Image",
-                                                fontSize = 13.sp,
-                                                color = Color(0xFF0EA5E9)
-                                            )
-                                        }
-                                    }
-
-                                    // App blocking selection
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Block Apps (${routine.blockedApps.size} apps):",
-                                            fontSize = 13.sp,
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        TextButton(
-                                            onClick = {
-                                                loadInstalledApps()
-                                                showAppPickerDialog = true
-                                            }
-                                        ) {
-                                            Text(text = "Manage Apps", fontSize = 13.sp, color = Color(0xFF0EA5E9))
-                                        }
-                                    }
-
-                                    // Trigger Configuration (Manual vs Timer)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Trigger Mode:",
-                                            fontSize = 13.sp,
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        
-                                        Row {
-                                            TextButton(
-                                                onClick = {
-                                                    routine.triggerType = "MANUAL"
-                                                    sharedPrefs.edit().putString("routine_${routine.id}", routine.toJsonObject().toString()).apply()
-                                                    val idx = routines.indexOfFirst { r -> r.id == routine.id }
-                                                    if (idx != -1) {
-                                                        routines[idx] = routine.copy(triggerType = "MANUAL")
-                                                    }
-                                                }
-                                            ) {
-                                                Text(
-                                                    text = "Manual",
-                                                    fontSize = 13.sp,
-                                                    color = if (routine.triggerType == "MANUAL") Color(0xFF0EA5E9) else Color(0xFF64748B),
-                                                    fontWeight = if (routine.triggerType == "MANUAL") FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            }
-                                            
-                                            TextButton(
-                                                onClick = {
-                                                    val calendar = Calendar.getInstance()
-                                                    val hour = calendar.get(Calendar.HOUR_OF_DAY)
-                                                    val minute = calendar.get(Calendar.MINUTE)
-                                                    
-                                                    val tpd = TimePickerDialog(context, { _, h, m ->
-                                                        val formattedTime = String.format("%02d:%02d", h, m)
-                                                        routine.triggerType = "TIMER"
-                                                        routine.triggerTime = formattedTime
-                                                        sharedPrefs.edit().putString("routine_${routine.id}", routine.toJsonObject().toString()).apply()
-                                                        
-                                                        val idx = routines.indexOfFirst { r -> r.id == routine.id }
-                                                        if (idx != -1) {
-                                                            routines[idx] = routine.copy(triggerType = "TIMER", triggerTime = formattedTime)
-                                                        }
-                                                    }, hour, minute, true)
-                                                    tpd.show()
-                                                }
-                                            ) {
-                                                Text(
-                                                    text = if (routine.triggerType == "TIMER") "Timer: ${routine.triggerTime}" else "Timer",
-                                                    fontSize = 13.sp,
-                                                    color = if (routine.triggerType == "TIMER") Color(0xFF0EA5E9) else Color(0xFF64748B),
-                                                    fontWeight = if (routine.triggerType == "TIMER") FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    // Lockscreen widget option toggle
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Show widget over lock screen",
-                                            fontSize = 13.sp,
-                                            color = Color.White
-                                        )
-                                        Checkbox(
-                                            checked = routine.isLockScreenOverlayEnabled,
-                                            onCheckedChange = { isChecked ->
-                                                routine.isLockScreenOverlayEnabled = isChecked
-                                                sharedPrefs.edit().putString("routine_${routine.id}", routine.toJsonObject().toString()).apply()
-                                                val idx = routines.indexOfFirst { r -> r.id == routine.id }
-                                                if (idx != -1) {
-                                                    routines[idx] = routine.copy(isLockScreenOverlayEnabled = isChecked)
-                                                }
-                                            },
-                                            colors = CheckboxDefaults.colors(
-                                                checkedColor = Color(0xFF0EA5E9),
-                                                uncheckedColor = Color(0xFF64748B)
-                                            )
-                                        )
-                                    }
-
-                                    // Delete routine button
-                                    Button(
-                                        onClick = {
-                                            sharedPrefs.edit().remove("routine_${routine.id}").apply()
-                                            routines.remove(routine)
-                                            editingRoutine = null
-                                            if (activeRoutineId == routine.id) {
-                                                val serviceIntent = Intent(context, RoutineService::class.java).apply {
-                                                    action = "STOP"
-                                                }
-                                                context.startService(serviceIntent)
-                                                activeRoutineId = null
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 12.dp),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Text(text = "Delete Routine", color = Color.White, fontWeight = FontWeight.Bold)
-                                    }
+                                if (routine.wallpaperUri != null) {
+                                    Text("✓ Selected", color = Color(0xFF10B981), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Text("+ Lock", color = Color(0xFF64748B), fontSize = 13.sp)
                                 }
                             }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Lock screen", fontSize = 12.sp, color = Color.White)
+                        }
+
+                        // Home screen preview Card
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .width(100.dp)
+                                    .height(160.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF1E2026))
+                                    .clickable { homeScreenWallpaperPicker.launch(arrayOf("image/*")) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (defaultWallpaperUri != null) {
+                                    Text("✓ Selected", color = Color(0xFF10B981), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Text("+ Home", color = Color(0xFF64748B), fontSize = 13.sp)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Home screen", fontSize = 12.sp, color = Color.White)
                         }
                     }
                 }
@@ -646,57 +527,111 @@ fun MainDashboardScreen() {
         }
     }
 
-    // Dialog: Create Routine
-    if (showCreateDialog) {
-        Dialog(onDismissRequest = { showCreateDialog = false }) {
+    // Dialog 1: Duration Select Dialog
+    if (showDurationDialog) {
+        Dialog(onDismissRequest = { showDurationDialog = false }) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF1E293B),
+                color = Color(0xFF1E2026),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
-                        text = "New Routine Mode",
+                        text = "Choose manual duration",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    DurationOption("Until I turn it off", onSelect = {
+                        val updated = routine.copy(durationMinutes = 0)
+                        routine = updated
+                        sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
+                        showDurationDialog = false
+                    })
+                    DurationOption("15 minutes", onSelect = {
+                        val updated = routine.copy(durationMinutes = 15)
+                        routine = updated
+                        sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
+                        showDurationDialog = false
+                    })
+                    DurationOption("30 minutes", onSelect = {
+                        val updated = routine.copy(durationMinutes = 30)
+                        routine = updated
+                        sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
+                        showDurationDialog = false
+                    })
+                    DurationOption("1 hour", onSelect = {
+                        val updated = routine.copy(durationMinutes = 60)
+                        routine = updated
+                        sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
+                        showDurationDialog = false
+                    })
+                    DurationOption("2 hours", onSelect = {
+                        val updated = routine.copy(durationMinutes = 120)
+                        routine = updated
+                        sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
+                        showDurationDialog = false
+                    })
+                    DurationOption("Custom duration...", onSelect = {
+                        showDurationDialog = false
+                        showCustomMinutesDialog = true
+                    })
+                }
+            }
+        }
+    }
+
+    // Dialog 1.5: Custom Minutes dialog
+    if (showCustomMinutesDialog) {
+        Dialog(onDismissRequest = { showCustomMinutesDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF1E2026),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "Set Custom Duration (minutes)",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
-                        value = newRoutineName,
-                        onValueChange = { newRoutineName = it },
-                        label = { Text("Routine Name") },
+                        value = customMinutesInput,
+                        onValueChange = { customMinutesInput = it },
+                        label = { Text("Minutes") },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF0EA5E9),
-                            unfocusedBorderColor = Color(0xFF64748B),
-                            focusedLabelColor = Color(0xFF0EA5E9),
-                            unfocusedLabelColor = Color(0xFF64748B),
                             focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF3B82F6),
+                            unfocusedBorderColor = Color(0xFF64748B)
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { showCreateDialog = false }) {
-                            Text("Cancel", color = Color(0xFF94A3B8))
+                        TextButton(onClick = { showCustomMinutesDialog = false }) {
+                            Text("Cancel", color = Color(0xFF64748B))
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = {
-                                if (newRoutineName.isNotBlank()) {
-                                    val r = RoutineModel(name = newRoutineName)
-                                    sharedPrefs.edit().putString("routine_${r.id}", r.toJsonObject().toString()).apply()
-                                    routines.add(r)
-                                    showCreateDialog = false
+                                val mins = customMinutesInput.toIntOrNull()
+                                if (mins != null && mins > 0) {
+                                    val updated = routine.copy(durationMinutes = mins)
+                                    routine = updated
+                                    sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
                                 }
+                                showCustomMinutesDialog = false
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0EA5E9))
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
                         ) {
-                            Text("Create")
+                            Text("Save")
                         }
                     }
                 }
@@ -704,12 +639,126 @@ fun MainDashboardScreen() {
         }
     }
 
-    // Dialog: Manage/Block Apps Checklist
+    // Dialog 2: Auto Start Trigger Editor
+    if (showAutoTriggerDialog) {
+        Dialog(onDismissRequest = { showAutoTriggerDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF1E2026),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "Automatic Time Trigger",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Choose starting and ending times for this focus routine.",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8),
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    // Auto Trigger Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "Enable Auto Trigger", color = Color.White, fontSize = 15.sp)
+                        Switch(
+                            checked = routine.isAutoTriggerEnabled,
+                            onCheckedChange = { isChecked ->
+                                if (isChecked && (routine.autoStartTime == null || routine.autoEndTime == null)) {
+                                    Toast.makeText(context, "Configure start/end times first!", Toast.LENGTH_SHORT).show()
+                                    return@Switch
+                                }
+                                val updated = routine.copy(isAutoTriggerEnabled = isChecked)
+                                routine = updated
+                                sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
+                                
+                                if (isChecked) {
+                                    scheduleAutoTrigger(updated)
+                                    Toast.makeText(context, "Auto trigger scheduled!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    cancelAutoTrigger(updated)
+                                    Toast.makeText(context, "Auto trigger disabled.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Start Time trigger selector
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val picker = TimePickerDialog(context, { _, h, m ->
+                                    val startStr = String.format("%02d:%02d", h, m)
+                                    val updated = routine.copy(autoStartTime = startStr)
+                                    routine = updated
+                                    sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
+                                    
+                                    if (updated.isAutoTriggerEnabled) {
+                                        scheduleAutoTrigger(updated)
+                                    }
+                                }, 8, 30, true)
+                                picker.show()
+                            }
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(text = "Start Time", color = Color.White)
+                        Text(text = routine.autoStartTime ?: "Configure ➔", color = Color(0xFF3B82F6), fontWeight = FontWeight.Bold)
+                    }
+
+                    // End Time trigger selector
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val picker = TimePickerDialog(context, { _, h, m ->
+                                    val endStr = String.format("%02d:%02d", h, m)
+                                    val updated = routine.copy(autoEndTime = endStr)
+                                    routine = updated
+                                    sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
+                                    
+                                    if (updated.isAutoTriggerEnabled) {
+                                        scheduleAutoTrigger(updated)
+                                    }
+                                }, 17, 30, true)
+                                picker.show()
+                            }
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(text = "End Time", color = Color.White)
+                        Text(text = routine.autoEndTime ?: "Configure ➔", color = Color(0xFF3B82F6), fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { showAutoTriggerDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Done")
+                    }
+                }
+            }
+        }
+    }
+
+    // Dialog 3: Manage Restricted Apps Checklist
     if (showAppPickerDialog) {
         Dialog(onDismissRequest = { showAppPickerDialog = false }) {
             Surface(
                 shape = RoundedCornerShape(20.dp),
-                color = Color(0xFF1E293B),
+                color = Color(0xFF1E2026),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(500.dp)
@@ -753,7 +802,7 @@ fun MainDashboardScreen() {
                                         }
                                     },
                                     colors = CheckboxDefaults.colors(
-                                        checkedColor = Color(0xFF0EA5E9),
+                                        checkedColor = Color(0xFF3B82F6),
                                         uncheckedColor = Color(0xFF64748B)
                                     )
                                 )
@@ -778,19 +827,13 @@ fun MainDashboardScreen() {
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = {
-                                editingRoutine?.let { routine ->
-                                    val selectedPackages = allApps.filter { it.isSelected }.map { it.packageName }
-                                    routine.blockedApps = selectedPackages
-                                    sharedPrefs.edit().putString("routine_${routine.id}", routine.toJsonObject().toString()).apply()
-                                    
-                                    val idx = routines.indexOfFirst { r -> r.id == routine.id }
-                                    if (idx != -1) {
-                                        routines[idx] = routine.copy(blockedApps = selectedPackages)
-                                    }
-                                }
+                                val selectedPackages = allApps.filter { it.isSelected }.map { it.packageName }
+                                val updated = routine.copy(blockedApps = selectedPackages)
+                                routine = updated
+                                sharedPrefs.edit().putString("routine_arise_default", updated.toJsonObject().toString()).apply()
                                 showAppPickerDialog = false
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0EA5E9))
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
                         ) {
                             Text("Save Selection")
                         }
@@ -802,39 +845,79 @@ fun MainDashboardScreen() {
 }
 
 @Composable
-fun PermissionRow(title: String, isGranted: Boolean, onRequest: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+fun SamsungSettingsCard(
+    title: String,
+    subtitle: String,
+    iconText: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2026))
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Medium)
-            Text(
-                text = if (isGranted) "Permission Active" else "Setup Required",
-                fontSize = 11.sp,
-                color = if (isGranted) Color(0xFF10B981) else Color(0xFFEF4444)
-            )
-        }
-        
-        if (!isGranted) {
-            Button(
-                onClick = onRequest,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(32.dp)
-            ) {
-                Text(text = "Grant", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            }
-        } else {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0x2310B981))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF2C2F36)), // darker badge bg
+                contentAlignment = Alignment.Center
             ) {
-                Text(text = "OK", fontSize = 11.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                Text(text = iconText, fontSize = 20.sp)
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 13.sp,
+                    color = Color(0xFF94A3B8)
+                )
             }
         }
     }
+}
+
+@Composable
+fun PermissionItem(name: String, onRequest: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = "• $name", fontSize = 12.sp, color = Color(0xFFFCA5A5))
+        Text(
+            text = "Grant ➔",
+            fontSize = 12.sp,
+            color = Color(0xFF3B82F6),
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.clickable { onRequest() }
+        )
+    }
+}
+
+@Composable
+fun DurationOption(text: String, onSelect: () -> Unit) {
+    Text(
+        text = text,
+        fontSize = 15.sp,
+        color = Color.White,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect() }
+            .padding(vertical = 12.dp)
+    )
 }

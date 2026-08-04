@@ -91,8 +91,9 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
     var routineName by remember { mutableStateOf("Arise Routine") }
     var timeString by remember { mutableStateOf("00:00") }
     var dateString by remember { mutableStateOf("Date") }
+    var countdownText by remember { mutableStateOf("") }
 
-    // Load active routine details
+    // Load active routine details & start dynamic ticker
     LaunchedEffect(Unit) {
         val sharedPrefs = context.getSharedPreferences("ArisePrefs", Context.MODE_PRIVATE)
         val activeRoutineId = sharedPrefs.getString("active_routine_id", null)
@@ -107,12 +108,35 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
                 }
             }
         }
-        
-        // Time & Date formatters
-        val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-        val dateFormat = SimpleDateFormat("EEEE, d MMMM", Locale.getDefault())
-        timeString = timeFormat.format(Date())
-        dateString = dateFormat.format(Date())
+
+        val endTime = sharedPrefs.getLong("active_routine_end_time", -1L)
+
+        // Continuous update loop for ticking clock and countdown
+        while (true) {
+            // 1. Update clock
+            val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+            val dateFormat = SimpleDateFormat("EEEE, d MMMM", Locale.getDefault())
+            timeString = timeFormat.format(Date())
+            dateString = dateFormat.format(Date())
+
+            // 2. Update countdown
+            if (endTime > 0) {
+                val remaining = endTime - System.currentTimeMillis()
+                if (remaining > 0) {
+                    val totalSecs = remaining / 1000
+                    val minutes = totalSecs / 60
+                    val seconds = totalSecs % 60
+                    countdownText = String.format("Remaining: %02d:%02d", minutes, seconds)
+                } else {
+                    countdownText = "Completed"
+                    onDismiss()
+                }
+            } else {
+                countdownText = "Duration: Until turned off"
+            }
+
+            kotlinx.coroutines.delay(1000)
+        }
     }
 
     Surface(
@@ -170,7 +194,7 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Arise Mode Running",
+                        text = "Arise Routine Active",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFF0EA5E9)
@@ -181,6 +205,14 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Countdown text
+                    Text(
+                        text = countdownText,
+                        fontSize = 16.sp,
+                        color = Color(0xFF10B981), // Emerald green highlight for ticking timer
+                        fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     

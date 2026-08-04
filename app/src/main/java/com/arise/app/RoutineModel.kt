@@ -9,10 +9,17 @@ data class RoutineModel(
     var name: String,
     var isActive: Boolean = false,
     var triggerType: String = "MANUAL", // "MANUAL" or "TIMER"
-    var triggerTime: String = "08:00",  // "HH:mm" format
+    var triggerTime: String = "08:00",  // "HH:mm" format (deprecated, replaced by autoStart/End)
     var wallpaperUri: String? = null,    // URI to custom wallpaper image
     var blockedApps: List<String> = emptyList(), // List of blocked app package names
-    var isLockScreenOverlayEnabled: Boolean = true
+    var isLockScreenOverlayEnabled: Boolean = true,
+    
+    // New features for Samsung Modes & Routines parity
+    var durationMinutes: Int = 0, // 0 means "Until I turn it off"
+    var autoStartTime: String? = null, // "HH:mm" format for auto trigger
+    var autoEndTime: String? = null, // "HH:mm" format for auto stop
+    var isAutoTriggerEnabled: Boolean = false,
+    var iconResName: String = "star" // "star", "book", "bed", "fitness", "heart"
 ) {
     fun toJsonObject(): JSONObject {
         val json = JSONObject()
@@ -28,6 +35,11 @@ data class RoutineModel(
         json.put("blockedApps", appsArray)
         
         json.put("isLockScreenOverlayEnabled", isLockScreenOverlayEnabled)
+        json.put("durationMinutes", durationMinutes)
+        json.put("autoStartTime", autoStartTime ?: JSONObject.NULL)
+        json.put("autoEndTime", autoEndTime ?: JSONObject.NULL)
+        json.put("isAutoTriggerEnabled", isAutoTriggerEnabled)
+        json.put("iconResName", iconResName)
         return json
     }
 
@@ -50,8 +62,27 @@ data class RoutineModel(
             }
             
             val isLockScreenOverlayEnabled = json.optBoolean("isLockScreenOverlayEnabled", true)
+            val durationMinutes = json.optInt("durationMinutes", 0)
+            val autoStartTime = if (json.isNull("autoStartTime")) null else json.getString("autoStartTime")
+            val autoEndTime = if (json.isNull("autoEndTime")) null else json.getString("autoEndTime")
+            val isAutoTriggerEnabled = json.optBoolean("isAutoTriggerEnabled", false)
+            val iconResName = json.optString("iconResName", "star")
             
-            return RoutineModel(id, name, isActive, triggerType, triggerTime, wallpaperUri, blockedApps, isLockScreenOverlayEnabled)
+            return RoutineModel(
+                id = id,
+                name = name,
+                isActive = isActive,
+                triggerType = triggerType,
+                triggerTime = triggerTime,
+                wallpaperUri = wallpaperUri,
+                blockedApps = blockedApps,
+                isLockScreenOverlayEnabled = isLockScreenOverlayEnabled,
+                durationMinutes = durationMinutes,
+                autoStartTime = autoStartTime,
+                autoEndTime = autoEndTime,
+                isAutoTriggerEnabled = isAutoTriggerEnabled,
+                iconResName = iconResName
+            )
         }
     }
 }
