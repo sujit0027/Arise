@@ -92,6 +92,8 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
     var timeString by remember { mutableStateOf("00:00") }
     var dateString by remember { mutableStateOf("Date") }
     var countdownText by remember { mutableStateOf("") }
+    var customFocusMessage by remember { mutableStateOf("") }
+    var isTimerEnabled by remember { mutableStateOf(false) }
 
     // Load active routine details & start dynamic ticker
     LaunchedEffect(Unit) {
@@ -103,6 +105,8 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
                 try {
                     val routine = RoutineModel.fromJson(routineJson)
                     routineName = routine.name
+                    customFocusMessage = routine.customFocusMessage
+                    isTimerEnabled = routine.isTimerEnabled
                 } catch (e: Exception) {
                     // Ignore
                 }
@@ -119,8 +123,8 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
             timeString = timeFormat.format(Date())
             dateString = dateFormat.format(Date())
 
-            // 2. Update countdown
-            if (endTime > 0) {
+            // 2. Update countdown (only if timer is enabled)
+            if (isTimerEnabled && endTime > 0) {
                 val remaining = endTime - System.currentTimeMillis()
                 if (remaining > 0) {
                     val totalSecs = remaining / 1000
@@ -132,7 +136,7 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
                     onDismiss()
                 }
             } else {
-                countdownText = "Duration: Until turned off"
+                countdownText = ""
             }
 
             kotlinx.coroutines.delay(1000)
@@ -206,14 +210,28 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    // Countdown text
-                    Text(
-                        text = countdownText,
-                        fontSize = 16.sp,
-                        color = Color(0xFF10B981), // Emerald green highlight for ticking timer
-                        fontWeight = FontWeight.Bold
-                    )
+                    
+                    // Display target focus message if exists
+                    if (customFocusMessage.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = customFocusMessage,
+                            fontSize = 15.sp,
+                            color = Color(0xFF94A3B8),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    // Display countdown if enabled
+                    if (isTimerEnabled && countdownText.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = countdownText,
+                            fontSize = 18.sp,
+                            color = Color(0xFF10B981), // Emerald green highlight
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Spacer(modifier = Modifier.height(24.dp))
                     
                     // Controls Row

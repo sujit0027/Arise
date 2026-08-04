@@ -90,7 +90,7 @@ class RoutineService : Service() {
         
         // Save state in prefs
         val sharedPrefs = getSharedPreferences("ArisePrefs", Context.MODE_PRIVATE)
-        val endTime = if (routine.durationMinutes > 0) {
+        val endTime = if (routine.isTimerEnabled && routine.durationMinutes > 0) {
             System.currentTimeMillis() + (routine.durationMinutes * 60 * 1000)
         } else {
             -1L
@@ -107,10 +107,18 @@ class RoutineService : Service() {
         val notification = createNotification(routine.name)
         startForeground(NOTIFICATION_ID, notification)
 
-        // 2. Set custom wallpaper if specified
-        routine.wallpaperUri?.let { uriStr ->
-            applyWallpaper(uriStr)
+        // 2. Set custom wallpaper if specified and enabled
+        if (routine.isWallpaperEnabled) {
+            routine.wallpaperUri?.let { uriStr ->
+                applyWallpaper(uriStr)
+            }
         }
+
+        // Play alerts if enabled
+        playStartStopAlert(routine)
+
+        // Update home screen widgets
+        updateWidgets()
 
         // 3. Always start monitoring loop to check timer expiry and restricted apps
         isMonitoring = true
@@ -119,9 +127,45 @@ class RoutineService : Service() {
         Log.d("RoutineService", "App monitoring and timer started for routine: ${routine.name}")
     }
 
+    private fun playStartStopAlert(routine: RoutineModel) {
+        if (!routine.isSoundAlertEnabled) return
+        try {
+            // Vibrate
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(android.os.VibrationEffect.createOneShot(300, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(300)
+            }
+            // Sound
+            val notificationUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+            val r = android.media.RingtoneManager.getRingtone(applicationContext, notificationUri)
+            r.play()
+        } catch (e: Exception) {
+            Log.e("RoutineService", "Failed to play start/stop alert: ${e.message}")
+        }
+    }
+
+    private fun updateWidgets() {
+        try {
+            val widgetIntent = Intent(this, RoutineWidgetProvider::class.java).apply {
+                action = android.appwidget.AppWidgetManager.ACTION_APPWIDGET_UPDATE
+            }
+            val ids = android.appwidget.AppWidgetManager.getInstance(applicationContext).getAppWidgetIds(
+                android.content.ComponentName(applicationContext, RoutineWidgetProvider::class.java)
+            )
+            widgetIntent.putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+            sendBroadcast(widgetIntent)
+            Log.d("RoutineService", "Sent update broadcast to widget provider.")
+        } catch (e: Exception) {
+            Log.e("RoutineService", "Failed to update widgets: ${e.message}")
+        }
+    }
+
     private fun checkDurationExpiry() {
         val routine = activeRoutine ?: return
-        if (routine.durationMinutes > 0) {
+        if (routine.isTimerEnabled && routine.durationMinutes > 0) {
             val sharedPrefs = getSharedPreferences("ArisePrefs", Context.MODE_PRIVATE)
             val endTime = sharedPrefs.getLong("active_routine_end_time", -1L)
             if (endTime > 0 && System.currentTimeMillis() >= endTime) {
@@ -135,6 +179,7 @@ class RoutineService : Service() {
     private fun stopActiveRoutine() {
         val sharedPrefs = getSharedPreferences("ArisePrefs", Context.MODE_PRIVATE)
         val activeId = sharedPrefs.getString("active_routine_id", null)
+        var soundEnabled = false
         
         if (activeId != null) {
             val routineJson = sharedPrefs.getString("routine_$activeId", null)
@@ -142,6 +187,7 @@ class RoutineService : Service() {
                 try {
                     val routine = RoutineModel.fromJson(routineJson)
                     routine.isActive = false
+                    soundEnabled = routine.isSoundAlertEnabled
                     sharedPrefs.edit().apply {
                         putString("routine_$activeId", routine.toJsonObject().toString())
                         remove("active_routine_id")
@@ -156,9 +202,23 @@ class RoutineService : Service() {
 
         isMonitoring = false
         handler.removeCallbacks(appCheckRunnable)
-        resetWallpaper()
+        
+        // Reset wallpaper if it was enabled
+        activeRoutine?.let {
+            if (it.isWallpaperEnabled) {
+                resetWallpaper()
+            }
+            if (soundEnabled) {
+                playStartStopAlert(it)
+            }
+        }
+        
         activeRoutine = null
-        Log.d("RoutineService", "Routine stopped and wallpaper reset.")
+        
+        // Update widgets
+        updateWidgets()
+        
+        Log.d("RoutineService", "Routine stopped and settings reset.")
     }
 
     private fun applyWallpaper(uriString: String) {
@@ -217,7 +277,7 @@ class RoutineService : Service() {
 
     private fun checkForegroundApp() {
         val routine = activeRoutine ?: return
-        if (routine.blockedApps.isEmpty()) return
+        if (!routine.isAppBlockEnabled || routine.blockedApps.isEmpty()) return
 
         val foregroundApp = getForegroundPackage(this)
         if (foregroundApp != null && routine.blockedApps.contains(foregroundApp)) {

@@ -1,14 +1,21 @@
 package com.arise.app
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 
 class RoutineReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
         val routineId = intent.getStringExtra("routine_id")
+        val routineName = intent.getStringExtra("routine_name") ?: "Arise Mode"
+        val minutesBefore = intent.getIntExtra("minutes_before", 5)
         Log.d("RoutineReceiver", "Received broadcast action: $action, routineId: $routineId")
 
         if (action == "ACTION_START_ROUTINE" && routineId != null) {
@@ -30,6 +37,41 @@ class RoutineReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 Log.e("RoutineReceiver", "Failed to stop service from alarm: ${e.message}")
             }
+        } else if (action == "ACTION_PRE_START_WARNING") {
+            showPreStartNotification(context, routineName, minutesBefore)
         }
+    }
+
+    private fun showPreStartNotification(context: Context, name: String, minutes: Int) {
+        val channelId = "AriseWarningChannel"
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId, 
+                "Arise Warning Alerts", 
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Sends warning alerts before routines start."
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val mainIntent = Intent(context, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            context, 0, mainIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setContentTitle("Routine Starting Soon")
+            .setContentText("\"$name\" will start in $minutes minutes. Wrap up your work!")
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(2002, notification)
     }
 }

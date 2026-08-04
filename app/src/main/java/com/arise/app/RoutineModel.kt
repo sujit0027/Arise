@@ -9,17 +9,29 @@ data class RoutineModel(
     var name: String,
     var isActive: Boolean = false,
     var triggerType: String = "MANUAL", // "MANUAL" or "TIMER"
-    var triggerTime: String = "08:00",  // "HH:mm" format (deprecated, replaced by autoStart/End)
+    var triggerTime: String = "08:00",  // HH:mm format (deprecated)
     var wallpaperUri: String? = null,    // URI to custom wallpaper image
     var blockedApps: List<String> = emptyList(), // List of blocked app package names
     var isLockScreenOverlayEnabled: Boolean = true,
     
-    // New features for Samsung Modes & Routines parity
-    var durationMinutes: Int = 0, // 0 means "Until I turn it off"
-    var autoStartTime: String? = null, // "HH:mm" format for auto trigger
-    var autoEndTime: String? = null, // "HH:mm" format for auto stop
+    // Auto scheduling
+    var autoStartTime: String? = null, 
+    var autoEndTime: String? = null, 
     var isAutoTriggerEnabled: Boolean = false,
-    var iconResName: String = "star" // "star", "book", "bed", "fitness", "heart"
+    
+    // Pre-start Warning
+    var preStartWarningMinutes: Int = 0, // 0 = disabled, 5, 10, etc.
+    
+    // Visual customization
+    var iconResName: String = "star", // "star", "book", "bed", "gym", "music", "work"
+    var customFocusMessage: String = "", // Daily target text
+    var durationMinutes: Int = 0, // 0 means "Until turned off"
+    
+    // Explicit action toggles (Samsung parity - at least one must be active to save)
+    var isWallpaperEnabled: Boolean = false,
+    var isAppBlockEnabled: Boolean = false,
+    var isTimerEnabled: Boolean = false,
+    var isSoundAlertEnabled: Boolean = false
 ) {
     fun toJsonObject(): JSONObject {
         val json = JSONObject()
@@ -35,11 +47,23 @@ data class RoutineModel(
         json.put("blockedApps", appsArray)
         
         json.put("isLockScreenOverlayEnabled", isLockScreenOverlayEnabled)
-        json.put("durationMinutes", durationMinutes)
+        
+        // Auto scheduling & Warnings
         json.put("autoStartTime", autoStartTime ?: JSONObject.NULL)
         json.put("autoEndTime", autoEndTime ?: JSONObject.NULL)
         json.put("isAutoTriggerEnabled", isAutoTriggerEnabled)
+        json.put("preStartWarningMinutes", preStartWarningMinutes)
+        
+        // Customizations
         json.put("iconResName", iconResName)
+        json.put("customFocusMessage", customFocusMessage)
+        json.put("durationMinutes", durationMinutes)
+        
+        // Action toggles
+        json.put("isWallpaperEnabled", isWallpaperEnabled)
+        json.put("isAppBlockEnabled", isAppBlockEnabled)
+        json.put("isTimerEnabled", isTimerEnabled)
+        json.put("isSoundAlertEnabled", isSoundAlertEnabled)
         return json
     }
 
@@ -62,11 +86,20 @@ data class RoutineModel(
             }
             
             val isLockScreenOverlayEnabled = json.optBoolean("isLockScreenOverlayEnabled", true)
-            val durationMinutes = json.optInt("durationMinutes", 0)
+            
             val autoStartTime = if (json.isNull("autoStartTime")) null else json.getString("autoStartTime")
             val autoEndTime = if (json.isNull("autoEndTime")) null else json.getString("autoEndTime")
             val isAutoTriggerEnabled = json.optBoolean("isAutoTriggerEnabled", false)
+            val preStartWarningMinutes = json.optInt("preStartWarningMinutes", 0)
+            
             val iconResName = json.optString("iconResName", "star")
+            val customFocusMessage = json.optString("customFocusMessage", "")
+            val durationMinutes = json.optInt("durationMinutes", 0)
+            
+            val isWallpaperEnabled = json.optBoolean("isWallpaperEnabled", false)
+            val isAppBlockEnabled = json.optBoolean("isAppBlockEnabled", false)
+            val isTimerEnabled = json.optBoolean("isTimerEnabled", false)
+            val isSoundAlertEnabled = json.optBoolean("isSoundAlertEnabled", false)
             
             return RoutineModel(
                 id = id,
@@ -77,11 +110,17 @@ data class RoutineModel(
                 wallpaperUri = wallpaperUri,
                 blockedApps = blockedApps,
                 isLockScreenOverlayEnabled = isLockScreenOverlayEnabled,
-                durationMinutes = durationMinutes,
                 autoStartTime = autoStartTime,
                 autoEndTime = autoEndTime,
                 isAutoTriggerEnabled = isAutoTriggerEnabled,
-                iconResName = iconResName
+                preStartWarningMinutes = preStartWarningMinutes,
+                iconResName = iconResName,
+                customFocusMessage = customFocusMessage,
+                durationMinutes = durationMinutes,
+                isWallpaperEnabled = isWallpaperEnabled,
+                isAppBlockEnabled = isAppBlockEnabled,
+                isTimerEnabled = isTimerEnabled,
+                isSoundAlertEnabled = isSoundAlertEnabled
             )
         }
     }

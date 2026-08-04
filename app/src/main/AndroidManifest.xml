@@ -92,6 +92,20 @@
             android:enabled="true"
             android:exported="false" />
 
+        <!-- Home Screen Widget Provider -->
+        <receiver
+            android:name=".RoutineWidgetProvider"
+            android:exported="true"
+            android:label="Arise Routine Widget">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.arise.app.WIDGET_TOGGLE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/routine_widget_info" />
+        </receiver>
+
     </application>
 
 </manifest>
