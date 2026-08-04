@@ -28,6 +28,9 @@ class RoutineReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 Log.e("RoutineReceiver", "Failed to start service from alarm: ${e.message}")
             }
+            // Reschedule start alarm for NEXT DAY (daily repetition)
+            rescheduleStartAlarm(context, routineId)
+            
         } else if (action == "ACTION_STOP_ROUTINE") {
             val serviceIntent = Intent(context, RoutineService::class.java).apply {
                 this.action = "STOP"
@@ -37,11 +40,107 @@ class RoutineReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 Log.e("RoutineReceiver", "Failed to stop service from alarm: ${e.message}")
             }
+            // Reschedule stop alarm for NEXT DAY if routineId known
+            if (routineId != null) {
+                rescheduleStopAlarm(context, routineId)
+            }
         } else if (action == "ACTION_PRE_START_WARNING") {
             showPreStartNotification(context, routineName, minutesBefore)
+            // Reschedule pre-start warning for NEXT DAY
+            if (routineId != null) {
+                rescheduleWarningAlarm(context, routineId, routineName, minutesBefore)
+            }
         } else if (action == "ACTION_WAKE_ALARM") {
             showWakeAlarmNotification(context)
         }
+    }
+
+    private fun rescheduleStartAlarm(context: Context, routineId: String) {
+        val sharedPrefs = context.getSharedPreferences("ArisePrefs", android.content.Context.MODE_PRIVATE)
+        val routineJson = sharedPrefs.getString("routine_$routineId", null) ?: return
+        val routine = try { RoutineModel.fromJson(routineJson) } catch (e: Exception) { return }
+        if (!routine.isAutoTriggerEnabled || routine.autoStartTime == null) return
+
+        val parts = routine.autoStartTime!!.split(":")
+        val calendar = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, parts[0].toInt())
+            set(java.util.Calendar.MINUTE, parts[1].toInt())
+            set(java.util.Calendar.SECOND, 0)
+            add(java.util.Calendar.DATE, 1) // always next day
+        }
+        val alarmManager = context.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager
+        val startIntent = Intent(context, RoutineReceiver::class.java).apply {
+            action = "ACTION_START_ROUTINE"
+            putExtra("routine_id", routineId)
+        }
+        val pending = android.app.PendingIntent.getBroadcast(
+            context, routineId.hashCode(), startIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        try {
+            alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pending)
+            Log.d("RoutineReceiver", "Rescheduled start alarm for next day: ${routine.autoStartTime}")
+        } catch (e: Exception) { Log.e("RoutineReceiver", "Reschedule start failed: ${e.message}") }
+    }
+
+    private fun rescheduleStopAlarm(context: Context, routineId: String) {
+        val sharedPrefs = context.getSharedPreferences("ArisePrefs", android.content.Context.MODE_PRIVATE)
+        val routineJson = sharedPrefs.getString("routine_$routineId", null) ?: return
+        val routine = try { RoutineModel.fromJson(routineJson) } catch (e: Exception) { return }
+        if (!routine.isAutoTriggerEnabled || routine.autoEndTime == null) return
+
+        val parts = routine.autoEndTime!!.split(":")
+        val calendar = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, parts[0].toInt())
+            set(java.util.Calendar.MINUTE, parts[1].toInt())
+            set(java.util.Calendar.SECOND, 0)
+            add(java.util.Calendar.DATE, 1) // always next day
+        }
+        val alarmManager = context.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager
+        val stopIntent = Intent(context, RoutineReceiver::class.java).apply {
+            action = "ACTION_STOP_ROUTINE"
+            putExtra("routine_id", routineId)
+        }
+        val pending = android.app.PendingIntent.getBroadcast(
+            context, routineId.hashCode() + 1, stopIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        try {
+            alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pending)
+            Log.d("RoutineReceiver", "Rescheduled stop alarm for next day: ${routine.autoEndTime}")
+        } catch (e: Exception) { Log.e("RoutineReceiver", "Reschedule stop failed: ${e.message}") }
+    }
+
+    private fun rescheduleWarningAlarm(context: Context, routineId: String, name: String, minutesBefore: Int) {
+        val sharedPrefs = context.getSharedPreferences("ArisePrefs", android.content.Context.MODE_PRIVATE)
+        val routineJson = sharedPrefs.getString("routine_$routineId", null) ?: return
+        val routine = try { RoutineModel.fromJson(routineJson) } catch (e: Exception) { return }
+        if (!routine.isAutoTriggerEnabled || routine.autoStartTime == null || routine.preStartWarningMinutes <= 0) return
+
+        val parts = routine.autoStartTime!!.split(":")
+        val calendar = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, parts[0].toInt())
+            set(java.util.Calendar.MINUTE, parts[1].toInt())
+            set(java.util.Calendar.SECOND, 0)
+            add(java.util.Calendar.DATE, 1)
+        }
+        val warningMillis = calendar.timeInMillis - (minutesBefore * 60 * 1000)
+        if (warningMillis <= System.currentTimeMillis()) return
+
+        val alarmManager = context.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager
+        val warningIntent = Intent(context, RoutineReceiver::class.java).apply {
+            action = "ACTION_PRE_START_WARNING"
+            putExtra("routine_id", routineId)
+            putExtra("routine_name", name)
+            putExtra("minutes_before", minutesBefore)
+        }
+        val pending = android.app.PendingIntent.getBroadcast(
+            context, routineId.hashCode() + 2, warningIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        try {
+            alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, warningMillis, pending)
+        } catch (e: Exception) { /* ignore */ }
     }
 
     private fun showWakeAlarmNotification(context: Context) {

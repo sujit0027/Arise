@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Wallpaper image picker permissions -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <application
         android:allowBackup="true"
@@ -90,7 +93,14 @@
         <receiver
             android:name=".RoutineReceiver"
             android:enabled="true"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="ACTION_START_ROUTINE" />
+                <action android:name="ACTION_STOP_ROUTINE" />
+                <action android:name="ACTION_PRE_START_WARNING" />
+                <action android:name="ACTION_WAKE_ALARM" />
+            </intent-filter>
+        </receiver>
 
         <!-- Home Screen Widget Provider -->
         <receiver

@@ -88,7 +88,8 @@ class RoutineService : Service() {
         }
 
         activeRoutine = routine
-        routine.isActive = true
+        // Create a proper copy with isActive=true for SharedPrefs (fixes ScreenReceiver lockscreen check)
+        val activeRoutineCopy = routine.copy().also { it.isActive = true }
         
         // Save state in prefs
         val sharedPrefs = getSharedPreferences("ArisePrefs", Context.MODE_PRIVATE)
@@ -100,7 +101,7 @@ class RoutineService : Service() {
 
         sharedPrefs.edit().apply {
             putString("active_routine_id", routine.id)
-            putString("routine_${routine.id}", routine.toJsonObject().toString())
+            putString("routine_${routine.id}", activeRoutineCopy.toJsonObject().toString()) // save with isActive=true
             putLong("active_routine_end_time", endTime)
             apply()
         }

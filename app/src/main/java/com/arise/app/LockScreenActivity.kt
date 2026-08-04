@@ -133,7 +133,12 @@ fun LockScreenUI(onDismiss: () -> Unit, onStopRoutine: () -> Unit) {
                     val seconds = totalSecs % 60
                     countdownText = String.format("Remaining: %02d:%02d", minutes, seconds)
                 } else {
-                    countdownText = "Completed"
+                    countdownText = "✓ Session Complete!"
+                    // Stop the background service too (not just dismiss overlay)
+                    val stopIntent = Intent(context, RoutineService::class.java).apply {
+                        action = "STOP"
+                    }
+                    context.startService(stopIntent)
                     onDismiss()
                 }
             } else {

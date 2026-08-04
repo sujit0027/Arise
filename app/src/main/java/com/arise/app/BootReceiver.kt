@@ -96,6 +96,7 @@ class BootReceiver : BroadcastReceiver() {
             }
             val stopIntent = Intent(context, RoutineReceiver::class.java).apply {
                 action = "ACTION_STOP_ROUTINE"
+                putExtra("routine_id", r.id) // needed for daily reschedule
             }
             val pendingStop = PendingIntent.getBroadcast(
                 context, r.id.hashCode() + 1, stopIntent,

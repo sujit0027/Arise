@@ -244,8 +244,19 @@ fun AriseAppDashboard() {
     // AlarmManager Trigger Schedules
     fun scheduleAutoTrigger(r: RoutineModel) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        
-        // 1. Schedule Auto Start Time
+
+        // Android 12+: Check if exact alarms are permitted — if not, open settings
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
+            Toast.makeText(
+                context,
+                "Auto-trigger needs 'Alarms & Reminders' permission. Opening settings...",
+                Toast.LENGTH_LONG
+            ).show()
+            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                Uri.parse("package:${context.packageName}"))
+            context.startActivity(intent)
+            return
+        }
         r.autoStartTime?.let { startStr ->
             val parts = startStr.split(":")
             val calendar = Calendar.getInstance().apply {
@@ -307,6 +318,7 @@ fun AriseAppDashboard() {
             }
             val stopIntent = Intent(context, RoutineReceiver::class.java).apply {
                 action = "ACTION_STOP_ROUTINE"
+                putExtra("routine_id", r.id) // routineId for daily reschedule
             }
             val pendingStop = PendingIntent.getBroadcast(
                 context, r.id.hashCode() + 1, stopIntent,
@@ -562,12 +574,15 @@ fun AriseAppDashboard() {
                                             }
                                             context.startForegroundService(serviceIntent)
                                             activeRoutineId = item.id
+                                            // Persist to SharedPrefs so state survives app minimize/rotate
+                                            sharedPrefs.edit().putString("active_routine_id", item.id).apply()
                                         } else {
                                             val serviceIntent = Intent(context, RoutineService::class.java).apply {
                                                 action = "STOP"
                                             }
                                             context.startService(serviceIntent)
                                             activeRoutineId = null
+                                            sharedPrefs.edit().remove("active_routine_id").apply()
                                         }
                                         // Don't call refreshRoutinesList here to prevent state reset
                                     },
@@ -700,6 +715,7 @@ fun AriseAppDashboard() {
                                 }
                                 context.startService(serviceIntent)
                                 activeRoutineId = null
+                                sharedPrefs.edit().remove("active_routine_id").apply()
                             } else {
                                 if (!overlayPermissionGranted) {
                                     Toast.makeText(context, "Opening overlay permission settings...", Toast.LENGTH_SHORT).show()
@@ -723,6 +739,8 @@ fun AriseAppDashboard() {
                                 }
                                 context.startForegroundService(serviceIntent)
                                 activeRoutineId = routineObj.id
+                                // Persist to SharedPrefs so state survives app minimize/rotate
+                                sharedPrefs.edit().putString("active_routine_id", routineObj.id).apply()
                             }
                             refreshRoutinesList()
                         },
@@ -884,10 +902,7 @@ fun AriseAppDashboard() {
                                 title = "Sound Alert / Beep",
                                 subtitle = if (routineObj.isSoundAlertEnabled) "Play notification beep on start & end" else "Silent transitions",
                                 iconText = "🔊",
-                                onClick = {
-                                    val updated = routineObj.copy(isSoundAlertEnabled = !routineObj.isSoundAlertEnabled)
-                                    editingRoutine = updated
-                                }
+                                onClick = { /* Use the switch above to toggle — card click is intentionally no-op */ }
                             )
                         }
                     }
@@ -1055,7 +1070,8 @@ fun AriseAppDashboard() {
                         Button(
                             onClick = {
                                 if (newRoutineName.isNotBlank()) {
-                                    val r = RoutineModel(name = newRoutineName)
+                                    // isTimerEnabled=true by default so Back button validation doesn't trap user
+                                    val r = RoutineModel(name = newRoutineName, isTimerEnabled = true)
                                     sharedPrefs.edit().putString("routine_${r.id}", r.toJsonObject().toString()).apply()
                                     routines.add(r)
                                     editingRoutine = r // Open editor immediately
