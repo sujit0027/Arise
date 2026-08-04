@@ -39,7 +39,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -272,7 +272,7 @@ fun MainDashboardScreen() {
                 }
             }
 
-            Divider(color = Color(0xFF1E293B), modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(color = Color(0xFF1E293B), modifier = Modifier.padding(vertical = 8.dp))
 
             // Dashboard items (Scrollable)
             LazyColumn(
@@ -478,7 +478,7 @@ fun MainDashboardScreen() {
                             // Quick settings if editing this card
                             AnimatedVisibility(visible = editingRoutine?.id == routine.id) {
                                 Column(modifier = Modifier.padding(top = 16.dp)) {
-                                    Divider(color = Color(0xFF334155), modifier = Modifier.padding(bottom = 12.dp))
+                                    HorizontalDivider(color = Color(0xFF334155), modifier = Modifier.padding(bottom = 12.dp))
                                     
                                     // Wallpaper picker for routine
                                     Row(
