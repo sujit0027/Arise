@@ -542,9 +542,17 @@ fun AriseAppDashboard() {
                                     checked = isRunning,
                                     onCheckedChange = { isChecked ->
                                         if (isChecked) {
-                                            // Check permissions
-                                            if (!overlayPermissionGranted || !usageStatsPermissionGranted) {
-                                                Toast.makeText(context, "Grant overlay and usage access permissions first!", Toast.LENGTH_LONG).show()
+                                            // Open Settings if permissions missing
+                                            if (!overlayPermissionGranted) {
+                                                Toast.makeText(context, "Opening overlay permission settings...", Toast.LENGTH_SHORT).show()
+                                                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                                context.startActivity(intent)
+                                                return@Switch
+                                            }
+                                            if (!usageStatsPermissionGranted) {
+                                                Toast.makeText(context, "Opening Usage Access settings...", Toast.LENGTH_SHORT).show()
+                                                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                                                context.startActivity(intent)
                                                 return@Switch
                                             }
                                             
@@ -561,7 +569,7 @@ fun AriseAppDashboard() {
                                             context.startService(serviceIntent)
                                             activeRoutineId = null
                                         }
-                                        refreshRoutinesList()
+                                        // Don't call refreshRoutinesList here to prevent state reset
                                     },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = Color.White,
@@ -693,8 +701,16 @@ fun AriseAppDashboard() {
                                 context.startService(serviceIntent)
                                 activeRoutineId = null
                             } else {
-                                if (!overlayPermissionGranted || !usageStatsPermissionGranted) {
-                                    Toast.makeText(context, "Permissions required first!", Toast.LENGTH_LONG).show()
+                                if (!overlayPermissionGranted) {
+                                    Toast.makeText(context, "Opening overlay permission settings...", Toast.LENGTH_SHORT).show()
+                                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                    context.startActivity(intent)
+                                    return@Button
+                                }
+                                if (!usageStatsPermissionGranted) {
+                                    Toast.makeText(context, "Opening Usage Access settings...", Toast.LENGTH_SHORT).show()
+                                    val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                                    context.startActivity(intent)
                                     return@Button
                                 }
                                 
@@ -822,14 +838,22 @@ fun AriseAppDashboard() {
                             Spacer(modifier = Modifier.width(8.dp))
                             SamsungSettingsCard(
                                 title = "Study Countdown & Target",
-                                subtitle = if (routineObj.customFocusMessage.isNotBlank()) {
-                                    "Target: ${routineObj.customFocusMessage}"
-                                } else {
-                                    "Display custom targets & timers on lockscreen"
+                                subtitle = buildString {
+                                    if (routineObj.isTimerEnabled && routineObj.durationMinutes > 0) {
+                                        append("⏱ ${routineObj.durationMinutes}min")
+                                    } else if (routineObj.isTimerEnabled) {
+                                        append("⏱ Until turned off")
+                                    }
+                                    if (routineObj.customFocusMessage.isNotBlank()) {
+                                        if (isNotEmpty()) append(" · ")
+                                        append("Target: ${routineObj.customFocusMessage}")
+                                    }
+                                    if (isEmpty()) append("Tap to set lockscreen timer & target")
                                 },
                                 iconText = "🎯",
                                 onClick = {
                                     customTargetInput = routineObj.customFocusMessage
+                                    customMinutesInput = if (routineObj.durationMinutes > 0) routineObj.durationMinutes.toString() else ""
                                     showCustomTargetDialog = true
                                 }
                             )
@@ -1397,54 +1421,159 @@ fun AriseAppDashboard() {
         }
     }
 
-    // DIALOG 4: Custom Target note input dialog
+    // DIALOG 4: Combined Countdown Timer + Target Note dialog
     if (showCustomTargetDialog) {
         Dialog(onDismissRequest = { showCustomTargetDialog = false }) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
                 color = Color(0xFF1E2026),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
-                        text = "Set Lockscreen Target Note",
+                        text = "Study Countdown & Target",
                         color = Color.White,
-                        fontSize = 16.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Set how long the countdown timer runs and what to show on lockscreen.",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                    )
+
+                    // ── SECTION 1: Countdown Duration ──────────────────────────
+                    Text(
+                        text = "Countdown Duration",
+                        color = Color(0xFF3B82F6),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    
+                    // Quick preset chips
+                    val presets = listOf(0 to "Off", 15 to "15 min", 25 to "25 min", 30 to "30 min", 45 to "45 min", 60 to "1 hr", 90 to "1.5 hr", 120 to "2 hr")
+                    val currentMins = customMinutesInput.toIntOrNull() ?: 0
+                    
+                    // Row 1 of presets
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        presets.take(4).forEach { (mins, label) ->
+                            val isSelected = currentMins == mins
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) Color(0xFF3B82F6) else Color(0xFF2C2F36))
+                                    .clickable { customMinutesInput = mins.toString() }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(text = label, color = Color.White, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    // Row 2 of presets
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        presets.drop(4).forEach { (mins, label) ->
+                            val isSelected = currentMins == mins
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) Color(0xFF3B82F6) else Color(0xFF2C2F36))
+                                    .clickable { customMinutesInput = mins.toString() }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(text = label, color = Color.White, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Custom manual input
                     OutlinedTextField(
-                        value = customTargetInput,
-                        onValueChange = { customTargetInput = it },
-                        label = { Text("Daily target / motivation note") },
+                        value = customMinutesInput,
+                        onValueChange = { if (it.all { c -> c.isDigit() }) customMinutesInput = it },
+                        label = { Text("Custom minutes (e.g. 50)", fontSize = 12.sp) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
                             focusedBorderColor = Color(0xFF3B82F6),
-                            unfocusedBorderColor = Color(0xFF64748B)
+                            unfocusedBorderColor = Color(0xFF64748B),
+                            focusedLabelColor = Color(0xFF94A3B8),
+                            unfocusedLabelColor = Color(0xFF64748B)
                         ),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
                     )
+
                     Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = Color(0xFF2C2F36))
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // ── SECTION 2: Lockscreen Target Note ─────────────────────
+                    Text(
+                        text = "Lockscreen Target Note",
+                        color = Color(0xFF3B82F6),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    OutlinedTextField(
+                        value = customTargetInput,
+                        onValueChange = { customTargetInput = it },
+                        label = { Text("Daily goal / motivation note", fontSize = 12.sp) },
+                        placeholder = { Text("e.g. Finish Physics Chapter 5", color = Color(0xFF4B5563), fontSize = 12.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF3B82F6),
+                            unfocusedBorderColor = Color(0xFF64748B),
+                            focusedLabelColor = Color(0xFF94A3B8),
+                            unfocusedLabelColor = Color(0xFF64748B)
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 3
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        TextButton(onClick = { showCustomTargetDialog = false }) {
+                        TextButton(
+                            onClick = { showCustomTargetDialog = false },
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Text("Cancel", color = Color(0xFF64748B))
                         }
                         Button(
                             onClick = {
-                                editingRoutine?.let {
-                                    val updated = it.copy(customFocusMessage = customTargetInput, isTimerEnabled = true)
+                                val mins = customMinutesInput.toIntOrNull() ?: 0
+                                editingRoutine?.let { current ->
+                                    val updated = current.copy(
+                                        customFocusMessage = customTargetInput.trim(),
+                                        durationMinutes = mins,
+                                        isTimerEnabled = mins > 0 || current.isTimerEnabled
+                                    )
                                     editingRoutine = updated
                                     sharedPrefs.edit().putString("routine_${updated.id}", updated.toJsonObject().toString()).apply()
                                 }
                                 showCustomTargetDialog = false
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Text("Save")
+                            Text("Save", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
