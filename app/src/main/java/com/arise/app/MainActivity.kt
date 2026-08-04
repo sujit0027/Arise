@@ -609,8 +609,14 @@ fun AriseAppDashboard() {
                         color = Color(0xFF3B82F6),
                         modifier = Modifier.clickable {
                             // Validate flexible action constraints: at least 1 toggle must be active to save
-                            if (!routineObj.isWallpaperEnabled && !routineObj.isAppBlockEnabled && !routineObj.isTimerEnabled && !routineObj.isSoundAlertEnabled) {
-                                Toast.makeText(context, "At least one Action (Wallpaper, Apps, Timer, or Sound Alert) must be enabled!", Toast.LENGTH_LONG).show()
+                            if (!routineObj.isWallpaperEnabled && !routineObj.isAppBlockEnabled && !routineObj.isTimerEnabled && !routineObj.isSoundAlertEnabled && !routineObj.isWakeAlarmEnabled) {
+                                Toast.makeText(context, "At least one Action must be enabled!", Toast.LENGTH_LONG).show()
+                                return@clickable
+                            }
+                            
+                            // Check overlap conflicts
+                            if (checkOverlapConflict(routineObj, routines)) {
+                                Toast.makeText(context, "Cannot save: Time conflicts with another routine schedule!", Toast.LENGTH_LONG).show()
                                 return@clickable
                             }
                             
@@ -857,6 +863,47 @@ fun AriseAppDashboard() {
                                 onClick = {
                                     val updated = routineObj.copy(isSoundAlertEnabled = !routineObj.isSoundAlertEnabled)
                                     editingRoutine = updated
+                                }
+                            )
+                        }
+                    }
+
+                    // THEN: WAKE ALARM ACTION
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Switch(
+                                checked = routineObj.isWakeAlarmEnabled,
+                                onCheckedChange = {
+                                    val updated = routineObj.copy(isWakeAlarmEnabled = it)
+                                    editingRoutine = updated
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFF60A5FA),
+                                    uncheckedThumbColor = Color(0xFF64748B),
+                                    uncheckedTrackColor = Color(0xFF2C2F36)
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            SamsungSettingsCard(
+                                title = "Wake Up Alarm",
+                                subtitle = if (routineObj.isWakeAlarmEnabled && routineObj.wakeAlarmTime != null) {
+                                    "Alarm scheduled for ${routineObj.wakeAlarmTime}"
+                                } else {
+                                    "Trigger alarm ringtone at routine end"
+                                },
+                                iconText = "⏰",
+                                onClick = {
+                                    val picker = TimePickerDialog(context, { _, h, m ->
+                                        val timeStr = String.format("%02d:%02d", h, m)
+                                        val updated = routineObj.copy(wakeAlarmTime = timeStr, isWakeAlarmEnabled = true)
+                                        editingRoutine = updated
+                                        sharedPrefs.edit().putString("routine_${updated.id}", updated.toJsonObject().toString()).apply()
+                                    }, 7, 0, true)
+                                    picker.show()
                                 }
                             )
                         }
@@ -1156,6 +1203,13 @@ fun AriseAppDashboard() {
                                 if (isChecked && (rObj.autoStartTime == null || rObj.autoEndTime == null)) {
                                     Toast.makeText(context, "Configure start/end times first!", Toast.LENGTH_SHORT).show()
                                     return@Switch
+                                }
+                                if (isChecked) {
+                                    val checkModel = rObj.copy(isAutoTriggerEnabled = true)
+                                    if (checkOverlapConflict(checkModel, routines)) {
+                                        Toast.makeText(context, "Conflict Warning: Overlaps with an existing routine schedule!", Toast.LENGTH_LONG).show()
+                                        return@Switch
+                                    }
                                 }
                                 val updated = rObj.copy(isAutoTriggerEnabled = isChecked)
                                 editingRoutine = updated
@@ -1513,4 +1567,96 @@ fun AriseAppDashboard() {
             }
         }
     }
+}
+
+@Composable
+fun SamsungSettingsCard(
+    title: String,
+    subtitle: String,
+    iconText: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2026))
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF2C2F36)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = iconText, fontSize = 20.sp)
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = Color(0xFF94A3B8)
+                )
+            }
+            Text(text = "〉", color = Color(0xFF64748B), fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+fun DurationOption(text: String, onSelect: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect() }
+            .padding(vertical = 12.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = text, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Text(text = "➔", color = Color(0xFF64748B))
+    }
+}
+
+// Time Overlap Check Helpers
+fun checkOverlapConflict(updated: RoutineModel, routines: List<RoutineModel>): Boolean {
+    if (!updated.isAutoTriggerEnabled || updated.autoStartTime == null || updated.autoEndTime == null) return false
+    
+    val uStart = timeToMinutes(updated.autoStartTime!!)
+    val uEnd = timeToMinutes(updated.autoEndTime!!)
+    
+    routines.forEach { r ->
+        if (r.id != updated.id && r.isAutoTriggerEnabled && r.autoStartTime != null && r.autoEndTime != null) {
+            val rStart = timeToMinutes(r.autoStartTime!!)
+            val rEnd = timeToMinutes(r.autoEndTime!!)
+            
+            if (intervalsOverlap(uStart, uEnd, rStart, rEnd)) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+fun timeToMinutes(timeStr: String): Int {
+    val parts = timeStr.split(":")
+    return parts[0].toInt() * 60 + parts[1].toInt()
+}
+
+fun intervalsOverlap(s1: Int, e1: Int, s2: Int, e2: Int): Boolean {
+    val end1 = if (e1 < s1) e1 + 1440 else e1
+    val end2 = if (e2 < s2) e2 + 1440 else e2
+    
+    return s1 < end2 && end1 > s2
 }

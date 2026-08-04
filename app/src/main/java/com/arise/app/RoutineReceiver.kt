@@ -39,7 +39,43 @@ class RoutineReceiver : BroadcastReceiver() {
             }
         } else if (action == "ACTION_PRE_START_WARNING") {
             showPreStartNotification(context, routineName, minutesBefore)
+        } else if (action == "ACTION_WAKE_ALARM") {
+            showWakeAlarmNotification(context)
         }
+    }
+
+    private fun showWakeAlarmNotification(context: Context) {
+        val channelId = "AriseWakeAlarmChannel"
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId, 
+                "Arise Wake Up Alarms", 
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Fires wake-up alarms at the end of routines."
+                setSound(
+                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM),
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setContentTitle("Wake Up Alert!")
+            .setContentText("Your sleep routine has ended. Time to wake up!")
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(2003, notification)
     }
 
     private fun showPreStartNotification(context: Context, name: String, minutes: Int) {

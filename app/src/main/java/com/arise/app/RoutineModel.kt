@@ -31,7 +31,11 @@ data class RoutineModel(
     var isWallpaperEnabled: Boolean = false,
     var isAppBlockEnabled: Boolean = false,
     var isTimerEnabled: Boolean = false,
-    var isSoundAlertEnabled: Boolean = false
+    var isSoundAlertEnabled: Boolean = false,
+    
+    // Wake Up Alarm
+    var isWakeAlarmEnabled: Boolean = false,
+    var wakeAlarmTime: String? = null // HH:mm format
 ) {
     fun toJsonObject(): JSONObject {
         val json = JSONObject()
@@ -64,6 +68,10 @@ data class RoutineModel(
         json.put("isAppBlockEnabled", isAppBlockEnabled)
         json.put("isTimerEnabled", isTimerEnabled)
         json.put("isSoundAlertEnabled", isSoundAlertEnabled)
+        
+        // Wake up Alarm
+        json.put("isWakeAlarmEnabled", isWakeAlarmEnabled)
+        json.put("wakeAlarmTime", wakeAlarmTime ?: JSONObject.NULL)
         return json
     }
 
@@ -101,6 +109,9 @@ data class RoutineModel(
             val isTimerEnabled = json.optBoolean("isTimerEnabled", false)
             val isSoundAlertEnabled = json.optBoolean("isSoundAlertEnabled", false)
             
+            val isWakeAlarmEnabled = json.optBoolean("isWakeAlarmEnabled", false)
+            val wakeAlarmTime = if (json.isNull("wakeAlarmTime")) null else json.getString("wakeAlarmTime")
+            
             return RoutineModel(
                 id = id,
                 name = name,
@@ -120,7 +131,9 @@ data class RoutineModel(
                 isWallpaperEnabled = isWallpaperEnabled,
                 isAppBlockEnabled = isAppBlockEnabled,
                 isTimerEnabled = isTimerEnabled,
-                isSoundAlertEnabled = isSoundAlertEnabled
+                isSoundAlertEnabled = isSoundAlertEnabled,
+                isWakeAlarmEnabled = isWakeAlarmEnabled,
+                wakeAlarmTime = wakeAlarmTime
             )
         }
     }

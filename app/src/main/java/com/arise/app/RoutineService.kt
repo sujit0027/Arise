@@ -1,5 +1,6 @@
 package com.arise.app
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -20,6 +21,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.InputStream
+import java.util.Calendar
 
 class RoutineService : Service() {
 
@@ -120,11 +122,55 @@ class RoutineService : Service() {
         // Update home screen widgets
         updateWidgets()
 
+        // Schedule Wake Up Alarm if configured and enabled
+        if (routine.isWakeAlarmEnabled && routine.wakeAlarmTime != null) {
+            scheduleWakeAlarm(routine)
+        }
+
         // 3. Always start monitoring loop to check timer expiry and restricted apps
         isMonitoring = true
         handler.removeCallbacks(appCheckRunnable)
         handler.post(appCheckRunnable)
         Log.d("RoutineService", "App monitoring and timer started for routine: ${routine.name}")
+    }
+
+    private fun scheduleWakeAlarm(routine: RoutineModel) {
+        val timeStr = routine.wakeAlarmTime ?: return
+        val parts = timeStr.split(":")
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, parts[0].toInt())
+            set(Calendar.MINUTE, parts[1].toInt())
+            set(Calendar.SECOND, 0)
+            if (before(Calendar.getInstance())) {
+                add(Calendar.DATE, 1)
+            }
+        }
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val alarmIntent = Intent(this, RoutineReceiver::class.java).apply {
+            action = "ACTION_WAKE_ALARM"
+        }
+        val pendingAlarm = PendingIntent.getBroadcast(
+            this, routine.id.hashCode() + 3, alarmIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        try {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingAlarm)
+            Log.d("RoutineService", "Scheduled wake-up alarm for ${routine.name} at $timeStr")
+        } catch (e: Exception) {
+            Log.e("RoutineService", "Failed to schedule wake-up alarm: ${e.message}")
+        }
+    }
+
+    private fun cancelWakeAlarm(routineId: String) {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val alarmIntent = Intent(this, RoutineReceiver::class.java).apply {
+            action = "ACTION_WAKE_ALARM"
+        }
+        val pendingAlarm = PendingIntent.getBroadcast(
+            this, routineId.hashCode() + 3, alarmIntent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        pendingAlarm?.let { alarmManager.cancel(it) }
     }
 
     private fun playStartStopAlert(routine: RoutineModel) {
@@ -211,6 +257,8 @@ class RoutineService : Service() {
             if (soundEnabled) {
                 playStartStopAlert(it)
             }
+            // Cancel wake alarm since routine stopped
+            cancelWakeAlarm(it.id)
         }
         
         activeRoutine = null
