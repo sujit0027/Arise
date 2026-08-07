@@ -1,0 +1,6 @@
+{
+  "name": "Routine Guard",
+  "description": "Strict routine-enforcement alarm clock requiring text-matching challenge to wake up and focus.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
