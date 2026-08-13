@@ -112,6 +112,8 @@ fun AriseAppDashboard() {
     var showWarningDialog by remember { mutableStateOf(false) }
     var showCustomTargetDialog by remember { mutableStateOf(false) }
     var showCustomMinutesDialog by remember { mutableStateOf(false) }
+    var showRingtonePicker by remember { mutableStateOf(false) }
+    var showPermissionsDialog by remember { mutableStateOf(false) }
     
     var customMinutesInput by remember { mutableStateOf("") }
     var customTargetInput by remember { mutableStateOf("") }
@@ -436,6 +438,33 @@ fun AriseAppDashboard() {
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    // Permissions Warning Banner
+                    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+                    val exactAlarmGranted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) alarmManager.canScheduleExactAlarms() else true
+                    val allPermsGranted = overlayPermissionGranted && usageStatsPermissionGranted && notificationPermissionGranted && exactAlarmGranted
+                    
+                    if (!allPermsGranted) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().clickable { showPermissionsDialog = true },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF991B1B)) // Red warning color
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = "⚠️", fontSize = 24.sp)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(text = "Permissions Required", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                        Text(text = "Tap to review and grant required permissions for full automation.", color = Color(0xFFFECACA), fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Default Wallpaper Setup Card
                     item {
                         Card(
@@ -901,8 +930,8 @@ fun AriseAppDashboard() {
                             SamsungSettingsCard(
                                 title = "Sound Alert / Beep",
                                 subtitle = if (routineObj.isSoundAlertEnabled) "Play notification beep on start & end" else "Silent transitions",
-                                iconText = "🔊",
-                                onClick = { /* Use the switch above to toggle — card click is intentionally no-op */ }
+                                iconText = "🔔",
+                                onClick = { showRingtonePicker = true }
                             )
                         }
                     }
@@ -936,7 +965,8 @@ fun AriseAppDashboard() {
                                 },
                                 iconText = "⏰",
                                 onClick = {
-                                    val picker = TimePickerDialog(context, { _, h, m ->
+                                    showRingtonePicker = true
+                                    val picker = android.app.TimePickerDialog(context, { _, h, m ->
                                         val timeStr = String.format("%02d:%02d", h, m)
                                         val updated = routineObj.copy(wakeAlarmTime = timeStr, isWakeAlarmEnabled = true)
                                         editingRoutine = updated
@@ -1711,8 +1741,136 @@ fun AriseAppDashboard() {
                 }
             }
         }
+
+        // --- RINGTONE PICKER DIALOG ---
+        if (showRingtonePicker && editingRoutine != null) {
+            val ringtoneItems = remember {
+                androidx.compose.runtime.mutableStateListOf<RingtoneItem>().apply {
+                    add(RingtoneItem("Default Alarm", null))
+                    add(RingtoneItem("Silent", "silent"))
+                    val rm = android.media.RingtoneManager(context as android.app.Activity)
+                    rm.setType(android.media.RingtoneManager.TYPE_ALARM)
+                    try {
+                        val cursor = rm.cursor
+                        if (cursor.moveToFirst()) {
+                            do {
+                                val title = cursor.getString(android.media.RingtoneManager.TITLE_COLUMN_INDEX)
+                                val uri = rm.getRingtoneUri(cursor.position).toString()
+                                add(RingtoneItem(title, uri))
+                            } while (cursor.moveToNext())
+                        }
+                        cursor.close()
+                    } catch (e: Exception) { }
+                }
+            }
+
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showRingtonePicker = false }) {
+                androidx.compose.material3.Card(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2026))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(text = "Select Ringtone", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.weight(1f)) {
+                            items(ringtoneItems) { rt ->
+                                val isSelected = editingRoutine?.ringtoneUri == rt.uri
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            val updated = editingRoutine!!.copy(ringtoneUri = rt.uri)
+                                            editingRoutine = updated
+                                            sharedPrefs.edit().putString("routine_${updated.id}", updated.toJsonObject().toString()).apply()
+                                            showRingtonePicker = false
+                                        }
+                                        .padding(vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    androidx.compose.material3.RadioButton(selected = isSelected, onClick = null)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(text = rt.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = { showRingtonePicker = false }, modifier = Modifier.align(Alignment.End)) {
+                            Text(text = "Cancel", color = Color(0xFF3B82F6))
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- PERMISSIONS DIALOG ---
+        if (showPermissionsDialog) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showPermissionsDialog = false }) {
+                androidx.compose.material3.Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2026))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(text = "Permissions Required", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Text(text = "Arise needs a few permissions to fully automate your routines:", color = Color(0xFF94A3B8), fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+                        val exactAlarmGranted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) alarmManager.canScheduleExactAlarms() else true
+
+                        if (!overlayPermissionGranted) {
+                            Button(
+                                onClick = { context.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:${context.packageName}"))) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Allow Display Over Other Apps") }
+                        }
+                        
+                        if (!usageStatsPermissionGranted) {
+                            Button(
+                                onClick = { context.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Allow App Usage Access") }
+                        }
+
+                        if (!notificationPermissionGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            Button(
+                                onClick = { 
+                                    val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply { putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName) }
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Allow Notifications") }
+                        }
+                        
+                        if (!exactAlarmGranted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION.CODES.S) {
+                            Button(
+                                onClick = { context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:${context.packageName}"))) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Allow Exact Alarms") }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        TextButton(onClick = { showPermissionsDialog = false }) {
+                            Text(text = "Close", color = Color(0xFF94A3B8))
+                        }
+                    }
+                }
+            }
+        }
     }
 }
+
+data class RingtoneItem(val title: String, val uri: String?)
 
 @Composable
 fun SamsungSettingsCard(

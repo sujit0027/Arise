@@ -51,7 +51,8 @@ class RoutineReceiver : BroadcastReceiver() {
                 rescheduleWarningAlarm(context, routineId, routineName, minutesBefore)
             }
         } else if (action == "ACTION_WAKE_ALARM") {
-            showWakeAlarmNotification(context)
+            val routineId = intent.getStringExtra("routine_id")
+            showWakeAlarmNotification(context, routineId)
         }
     }
 
@@ -143,8 +144,26 @@ class RoutineReceiver : BroadcastReceiver() {
         } catch (e: Exception) { /* ignore */ }
     }
 
-    private fun showWakeAlarmNotification(context: Context) {
-        val channelId = "AriseWakeAlarmChannel"
+    private fun showWakeAlarmNotification(context: Context, routineId: String?) {
+        var ringtoneUri: android.net.Uri? = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+        var isSilent = false
+        if (routineId != null) {
+            val sharedPrefs = context.getSharedPreferences("ArisePrefs", Context.MODE_PRIVATE)
+            val routineJson = sharedPrefs.getString("routine_$routineId", null)
+            if (routineJson != null) {
+                try {
+                    val routine = RoutineModel.fromJson(routineJson)
+                    if (routine.ringtoneUri == "silent") {
+                        isSilent = true
+                        ringtoneUri = null
+                    } else if (routine.ringtoneUri != null) {
+                        ringtoneUri = android.net.Uri.parse(routine.ringtoneUri)
+                    }
+                } catch (e: Exception) {}
+            }
+        }
+        
+        val channelId = "AriseWakeAlarmChannel_${ringtoneUri?.hashCode() ?: "silent"}"
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -154,13 +173,17 @@ class RoutineReceiver : BroadcastReceiver() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Fires wake-up alarms at the end of routines."
-                setSound(
-                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM),
-                    android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
+                if (isSilent || ringtoneUri == null) {
+                    setSound(null, null)
+                } else {
+                    setSound(
+                        ringtoneUri,
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                }
             }
             notificationManager.createNotificationChannel(channel)
         }

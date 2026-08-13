@@ -149,6 +149,7 @@ class RoutineService : Service() {
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val alarmIntent = Intent(this, RoutineReceiver::class.java).apply {
             action = "ACTION_WAKE_ALARM"
+            putExtra("routine_id", routine.id)
         }
         val pendingAlarm = PendingIntent.getBroadcast(
             this, routine.id.hashCode() + 3, alarmIntent,
@@ -166,6 +167,7 @@ class RoutineService : Service() {
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val alarmIntent = Intent(this, RoutineReceiver::class.java).apply {
             action = "ACTION_WAKE_ALARM"
+            putExtra("routine_id", routineId)
         }
         val pendingAlarm = PendingIntent.getBroadcast(
             this, routineId.hashCode() + 3, alarmIntent,
